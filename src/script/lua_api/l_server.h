@@ -24,6 +24,9 @@ private:
 	// get_worldpath()
 	static int l_get_worldpath(lua_State *L);
 
+	// read_session_access_file()
+	static int l_read_session_access_file(lua_State *L);
+
 	// get_mod_data_path()
 	static int l_get_mod_data_path(lua_State *L);
 

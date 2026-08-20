@@ -484,6 +484,21 @@ int ModApiServer::l_get_worldpath(lua_State *L)
 	return 1;
 }
 
+// read_session_access_file()
+int ModApiServer::l_read_session_access_file(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+
+	const Server *srv = getServer(L);
+	std::string contents;
+	const std::string path = srv->getWorldPath() + DIR_DELIM + "session-access.json";
+	if (!fs::ReadFile(path, contents))
+		return 0;
+
+	lua_pushlstring(L, contents.data(), contents.size());
+	return 1;
+}
+
 // get_mod_data_path()
 int ModApiServer::l_get_mod_data_path(lua_State *L)
 {
@@ -688,6 +703,7 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(get_server_max_lag);
 	API_FCT(get_mod_data_path);
 	API_FCT(get_worldpath);
+	API_FCT(read_session_access_file);
 	API_FCT(is_singleplayer);
 
 	API_FCT(get_current_modname);

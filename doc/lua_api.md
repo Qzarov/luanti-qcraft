@@ -6118,6 +6118,9 @@ Utilities
 
 * `core.get_worldpath()`: returns e.g. `"/home/user/.minetest/world"`
     * Useful for storing custom data
+* `core.read_session_access_file()`: returns the contents of the server world's
+  `session-access.json`, or `nil` if it cannot be read. This server-side API
+  accepts no path argument.
 * `core.get_mod_data_path()`: returns e.g. `"/home/user/.minetest/mod_data/mymod"`
     * Useful for storing custom data *independently of worlds*.
     * Must be called during mod load time.
