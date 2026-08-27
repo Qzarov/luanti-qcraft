@@ -483,11 +483,17 @@ void TestMapBlock::testMicroSaveLoad(IGameDef *gamedef)
 
 	// t_CONTENT_STONE is registered by the test harness in test.cpp.
 	const content_t c_stone = t_CONTENT_STONE;
+	// Never placed as a bulk node anywhere in this block: this exercises
+	// the palette-only path, where nimap registration during serialize is
+	// the only thing keeping the material's identity alive across a
+	// round trip, and where a reuse-versus-new-local-id mistake would land.
+	const content_t c_grass = t_CONTENT_GRASS;
 
 	MapBlock block({}, gamedef);
 	block.setNode(v3s16(1, 2, 3), MapNode(c_stone));
 	UASSERT(block.m_micro.setSub(*pool, v3s16(1, 2, 3), 5, c_stone));
 	UASSERT(block.m_micro.setSub(*pool, v3s16(6, 2, 3), 0, c_stone));
+	UASSERT(block.m_micro.setSub(*pool, v3s16(9, 2, 3), 0, c_grass));
 
 	std::ostringstream os(std::ios_base::binary);
 	block.serialize(os, SER_FMT_VER_HIGHEST_WRITE, true, -1);
@@ -507,6 +513,8 @@ void TestMapBlock::testMicroSaveLoad(IGameDef *gamedef)
 	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(1, 2, 3), 5), c_stone);
 	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(1, 2, 3), 4), CONTENT_AIR);
 	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(6, 2, 3), 0), c_stone);
+	// The palette-only material survives too, as itself.
+	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(9, 2, 3), 0), c_grass);
 	// Untouched tiles are still absent rather than allocated on load.
 	UASSERTEQ(int, reloaded.m_micro.tileAt(v3s16(12, 12, 12)), MICRO_NO_TILE);
 

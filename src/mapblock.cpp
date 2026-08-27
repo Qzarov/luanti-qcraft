@@ -119,6 +119,12 @@ MapBlock::~MapBlock()
 	}
 #endif
 
+	// Release any carved tiles back to the pool before this block goes away.
+	// Without this, every unloaded carved block permanently leaks tiles from
+	// the fixed-capacity pool until it is exhausted.
+	if (MicroTilePool *pool = m_gamedef->getMicroPool())
+		m_micro.clear(*pool);
+
 	delete[] data;
 	if (!m_is_mono_block)
 		porting::TrackFreedMemory(sizeof(MapNode) * nodecount);
@@ -426,12 +432,24 @@ void MapBlock::correctBlockNodeIds(const NameIdMapping *nimap, MapNode *nodes,
 				continue;
 			const u8 used = pool->paletteUsed(tile);
 			for (u8 i = 0; i < used; i++) {
+				const content_t local_id = pool->palette(tile)[i];
+
 				std::string name;
-				if (!nimap->getName(pool->palette(tile)[i], name))
-					continue;
-				content_t local_id;
-				if (nodedef->getId(name, local_id))
-					pool->palette(tile)[i] = local_id;
+				if (!nimap->getName(local_id, name)) {
+					throw SerializationError("MapBlock::correctBlockNodeIds(): "
+						"Microblock palette contains id " + itos(local_id) +
+						" with no name mapping");
+				}
+
+				content_t global_id;
+				if (!nodedef->getId(name, global_id)) {
+					global_id = gamedef->allocateUnknownNodeId(name);
+					if (global_id == CONTENT_IGNORE) {
+						throw SerializationError("MapBlock::correctBlockNodeIds(): "
+							"Could not allocate global id for node name \"" + name + "\"");
+					}
+				}
+				pool->palette(tile)[i] = global_id;
 			}
 		}
 	}
@@ -529,8 +547,17 @@ void MapBlock::serialize(std::ostream &os_compressed, u8 version, bool disk, int
 		if (present) {
 			writeU8(os, pool->geometry().n);
 			const std::vector<u16> &dir = m_micro.directory();
+			// A presence bitmap, not the raw pool indices: those are
+			// session-local, non-deterministic numbers that mean nothing
+			// once written to disk (only whether a slot is present matters
+			// on load, which allocates a fresh tile per set bit).
+			static_assert(MICRO_TILES_PER_BLOCK <= 64,
+					"presence bitmap needs a wider integer");
+			u64 present_bits = 0;
 			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++)
-				writeU16(os, dir[slot]);
+				if (dir[slot] != MICRO_NO_TILE)
+					present_bits |= (u64)1 << slot;
+			writeU64(os, present_bits);
 
 			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++) {
 				const u16 tile = dir[slot];
@@ -602,6 +629,14 @@ void MapBlock::deSerialize(std::istream &in_compressed, u8 version, bool disk)
 
 	m_is_air_expired = true;
 	expandNodesIfNeeded();
+
+	// Deserializing replaces this block's content entirely, carvings
+	// included. Clear unconditionally, before even looking at whether this
+	// stream has a microblock section, so reusing an existing MapBlock to
+	// load an older-format block (or one with nothing carved) can never
+	// leave stale carvings - and their tiles - behind.
+	if (MicroTilePool *pool = m_gamedef->getMicroPool())
+		m_micro.clear(*pool);
 
 	if(version <= 21)
 	{
@@ -700,20 +735,25 @@ void MapBlock::deSerialize(std::istream &in_compressed, u8 version, bool disk)
 				throw SerializationError("MapBlock::deSerialize(): "
 						"microblock subdivision does not match the world");
 
-			std::vector<u16> stored(MICRO_TILES_PER_BLOCK);
-			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++)
-				stored[slot] = readU16(is);
-
-			m_micro.clear(*pool);
+			// m_micro was already cleared unconditionally above; just size
+			// the directory back up before filling in the allocated slots.
+			const u64 present_bits = readU64(is);
 			m_micro.directory().assign(MICRO_TILES_PER_BLOCK, MICRO_NO_TILE);
 
 			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++) {
-				if (stored[slot] == MICRO_NO_TILE)
+				if (!((present_bits >> slot) & 1))
 					continue;
 				const u16 tile = pool->allocate();
 				if (tile == MICRO_NO_TILE)
 					throw SerializationError("MapBlock::deSerialize(): "
 							"microblock pool exhausted while loading");
+				// Record the tile before reading its contents, so that if
+				// anything below throws, this tile is already reachable
+				// through m_micro and gets released (by the destructor, or
+				// whatever else eventually clears m_micro) instead of
+				// leaking silently.
+				m_micro.directory()[slot] = tile;
+
 				const u8 used = readU8(is);
 				if (used == 0 || used > MICRO_PALETTE_SLOTS)
 					throw SerializationError("MapBlock::deSerialize(): "
@@ -723,7 +763,9 @@ void MapBlock::deSerialize(std::istream &in_compressed, u8 version, bool disk)
 				pool->paletteUsed(tile) = used;
 				is.read(reinterpret_cast<char *>(pool->nibbles(tile)),
 						(size_t)MICRO_TILE_NODES * pool->geometry().bytes_per_node);
-				m_micro.directory()[slot] = tile;
+				if (is.eof())
+					throw SerializationError("MapBlock::deSerialize(): "
+							"truncated microblock tile data");
 			}
 		}
 	}
