@@ -202,7 +202,13 @@ bool MicroLayer::setSub(MicroTilePool &pool, v3s16 relp, u16 sub, content_t c)
 	}
 	if (found == MICRO_PALETTE_SLOTS) {
 		if (used >= MICRO_PALETTE_SLOTS) {
-			// Roll back a tile allocated only for this refused write.
+			// Roll back a tile allocated only for this refused write. The
+			// `allocated_here` branch below is currently unreachable: a
+			// freshly allocated tile starts with paletteUsed == 1
+			// (resetTile), and this call adds at most one more material, so
+			// a brand-new tile can never already be full. It stays here as a
+			// zero-cost safety net that becomes live if a future change ever
+			// prefills a palette on allocation.
 			if (allocated_here)
 				pool.release(tile);
 			return false;

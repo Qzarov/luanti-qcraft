@@ -235,7 +235,15 @@ void TestMicroblocks::testLayerPaletteFull()
 	// Slot 0 is air, so fifteen materials fit and the sixteenth is refused.
 	for (content_t c = 1; c <= 15; c++)
 		UASSERT(layer.setSub(pool, v3s16(0, 0, 0), c, c));
+
+	const u32 used_before = pool.used();
+	const u16 tile_before = layer.tileAt(v3s16(0, 0, 0));
 	UASSERT(!layer.setSub(pool, v3s16(0, 0, 0), 20, 200));
+	// The refused write's tile already existed before this call, so it must
+	// not be released: it is still in use for the fifteen materials already
+	// written into it.
+	UASSERTEQ(u32, pool.used(), used_before);
+	UASSERTEQ(int, layer.tileAt(v3s16(0, 0, 0)), tile_before);
 
 	// The refusal must not corrupt what was already written.
 	UASSERTEQ(int, layer.getSub(pool, v3s16(0, 0, 0), 1), 1);
