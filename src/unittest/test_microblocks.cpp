@@ -19,6 +19,8 @@ public:
 	void testSubIndex();
 	void testPool();
 	void testPoolExhaustion();
+	void testPoolDoubleRelease();
+	void testPoolReleaseNeverAllocated();
 };
 
 static TestMicroblocks g_test_instance;
@@ -31,6 +33,8 @@ void TestMicroblocks::runTests(IGameDef *gamedef)
 	TEST(testSubIndex);
 	TEST(testPool);
 	TEST(testPoolExhaustion);
+	TEST(testPoolDoubleRelease);
+	TEST(testPoolReleaseNeverAllocated);
 }
 
 void TestMicroblocks::testGeometry()
@@ -133,4 +137,43 @@ void TestMicroblocks::testPoolExhaustion()
 	UASSERTEQ(int, pool.allocate(), MICRO_NO_TILE);
 	UASSERTEQ(u32, pool.used(), 2);
 	UASSERTEQ(u32, pool.capacity(), 2);
+}
+
+void TestMicroblocks::testPoolDoubleRelease()
+{
+	MicroTilePool pool(microGeometryFor(4), 2);
+	const u16 a = pool.allocate();
+	UASSERT(a != MICRO_NO_TILE);
+
+	pool.release(a);
+	UASSERTEQ(u32, pool.used(), 0);
+	// Releasing the same tile again must be a no-op: it must not push a
+	// second copy of `a` onto the freelist, which would otherwise let the
+	// next two allocations both hand out `a`.
+	pool.release(a);
+	UASSERTEQ(u32, pool.used(), 0);
+
+	const u16 b = pool.allocate();
+	const u16 c = pool.allocate();
+	UASSERT(b != MICRO_NO_TILE);
+	UASSERT(c != MICRO_NO_TILE);
+	// Two allocations must never return the same tile.
+	UASSERT(b != c);
+}
+
+void TestMicroblocks::testPoolReleaseNeverAllocated()
+{
+	MicroTilePool pool(microGeometryFor(4), 2);
+	// Tile 1 was never allocated; releasing it must be harmless, not corrupt
+	// the freelist, and not disturb the used() count.
+	pool.release(1);
+	UASSERTEQ(u32, pool.used(), 0);
+
+	const u16 a = pool.allocate();
+	const u16 b = pool.allocate();
+	UASSERT(a != MICRO_NO_TILE);
+	UASSERT(b != MICRO_NO_TILE);
+	UASSERT(a != b);
+	UASSERTEQ(u32, pool.used(), 2);
+	UASSERTEQ(int, pool.allocate(), MICRO_NO_TILE);
 }

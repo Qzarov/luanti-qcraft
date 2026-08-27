@@ -91,6 +91,11 @@ public:
 	//! Returns MICRO_NO_TILE when the pool is full. The tile is zeroed and its
 	//! palette holds CONTENT_AIR in slot 0.
 	u16 allocate();
+	//! Harmless no-op if tile is MICRO_NO_TILE, out of range, or not currently
+	//! allocated (double release, or a tile that was never allocated). Only a
+	//! tile that is actually in use is returned to the freelist, so a bad
+	//! release can never hand the same tile to two owners and can never grow
+	//! the freelist past its constructor-time capacity.
 	void release(u16 tile);
 
 	content_t *palette(u16 tile);
@@ -108,6 +113,9 @@ public:
 	const MicroGeometry &geometry() const { return m_geom; }
 
 private:
+	//! Bounds-checks tile with a check that survives a Release build (unlike
+	//! assert()), since an out-of-range index would otherwise read or write
+	//! past m_storage with no crash.
 	u8 *tileAt(u16 tile);
 	const u8 *tileAt(u16 tile) const;
 	void resetTile(u16 tile);
@@ -118,4 +126,7 @@ private:
 	u32 m_used = 0;
 	std::vector<u8> m_storage;
 	std::vector<u16> m_free;
+	//! One flag per tile: whether it is currently handed out. Sized once in
+	//! the constructor alongside m_storage and m_free.
+	std::vector<bool> m_in_use;
 };

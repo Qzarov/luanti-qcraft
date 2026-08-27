@@ -4,9 +4,10 @@
 #include "microblocks.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cstring>
 #include <stdexcept>
+
+#include "debug.h"
 
 bool microSubdivisionSupported(u8 n)
 {
@@ -36,17 +37,24 @@ MicroTilePool::MicroTilePool(MicroGeometry geom, u32 tile_count) :
 	// Reverse order so that the first allocation returns tile 0.
 	for (u32 i = m_capacity; i > 0; i--)
 		m_free.push_back((u16)(i - 1));
+
+	// One flag per tile, sized once here so allocate()/release() never touch
+	// the allocator.
+	m_in_use.assign(m_capacity, false);
 }
 
 u8 *MicroTilePool::tileAt(u16 tile)
 {
-	assert(tile < m_capacity);
+	// sanity_check (unlike assert) persists in Release builds, where NDEBUG
+	// would otherwise strip this and let an out-of-range index read or write
+	// past m_storage through the reinterpret_cast in palette()/nibbles().
+	sanity_check(tile < m_capacity);
 	return m_storage.data() + (size_t)tile * m_stride;
 }
 
 const u8 *MicroTilePool::tileAt(u16 tile) const
 {
-	assert(tile < m_capacity);
+	sanity_check(tile < m_capacity);
 	return m_storage.data() + (size_t)tile * m_stride;
 }
 
@@ -66,6 +74,7 @@ u16 MicroTilePool::allocate()
 	const u16 tile = m_free.back();
 	m_free.pop_back();
 	m_used++;
+	m_in_use[tile] = true;
 	resetTile(tile);
 	return tile;
 }
@@ -74,8 +83,20 @@ void MicroTilePool::release(u16 tile)
 {
 	if (tile == MICRO_NO_TILE)
 		return;
-	assert(tile < m_capacity);
-	assert(m_used > 0);
+	// Bounds-check with sanity_check, not assert: this must still catch a bad
+	// caller-supplied index in a Release build, before it ever reaches
+	// m_in_use or m_free.
+	sanity_check(tile < m_capacity);
+	if (!m_in_use[tile]) {
+		// Double release, or a tile that was never allocated: harmless no-op.
+		// Without this guard the same index would be pushed onto m_free
+		// twice, so the next two allocate() calls would hand the same tile
+		// to two different owners, and repeated bad releases would grow
+		// m_free past its constructor-time reserve(), forcing a heap
+		// allocation during carving.
+		return;
+	}
+	m_in_use[tile] = false;
 	m_used--;
 	m_free.push_back(tile);
 }
