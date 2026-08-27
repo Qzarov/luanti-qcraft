@@ -14,6 +14,7 @@ end
 
 local time_to_live = tonumber(core.settings:get("item_entity_ttl")) or 900
 local gravity = tonumber(core.settings:get("movement_gravity")) or 9.81
+local auto_pickup_radius = math.max(tonumber(core.settings:get("item_auto_pickup_radius")) or 0, 0)
 
 
 core.register_entity(":__builtin:item", {
@@ -207,6 +208,20 @@ core.register_entity(":__builtin:item", {
 
 		assert(moveresult,
 			"Collision info missing, this is caused by an out-of-date/buggy mod or game")
+
+		-- Reuse on_punch so custom on_pickup callbacks and full inventories
+		-- receive the same handling as a normal pickup.
+		if not self.moving_state and auto_pickup_radius > 0 then
+			local objects = core.get_objects_inside_radius(pos, auto_pickup_radius)
+			for _, obj in pairs(objects) do
+				if obj:is_player() then
+					self:on_punch(obj)
+					if self.itemstring == "" then
+						return
+					end
+				end
+			end
+		end
 
 		if not moveresult.collides then
 			-- future TODO: items should probably decelerate in air

@@ -1041,6 +1041,10 @@ max_users (Maximum users) int 15 0 65535
 #    If this is set, players will always (re)spawn at the given position.
 static_spawnpoint (Static spawn point) string
 
+#    Wait for the mapblock containing the static spawn point to emerge before
+#    placing new or respawning players there.
+static_spawnpoint_wait_for_map (Wait for static spawn map) bool false
+
 [**Networking]
 
 #    Network port to listen (UDP).
@@ -1145,6 +1149,10 @@ world_start_time (World start time) [world_creation] int 6125 0 23999
 #    Time in seconds for item entity (dropped items) to live.
 #    Setting it to -1 disables the feature.
 item_entity_ttl (Item entity TTL) int 900 -1
+
+#    Radius in nodes in which a stationary dropped item is automatically picked
+#    up by a nearby player. Set to 0 to disable automatic pickup.
+item_auto_pickup_radius (Item automatic pickup radius) float 0 0
 
 #    Specifies the default stack size of nodes, items and tools.
 #    Note that mods or games may explicitly set a stack for certain (or all) items.
