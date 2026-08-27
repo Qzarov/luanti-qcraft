@@ -1205,7 +1205,7 @@ fixed_map_seed (Fixed map seed) string
 #    Creating a world in the main menu will override this.
 #    Current mapgens in a highly unstable state:
 #    -    The optional floatlands of v7 (disabled by default).
-mg_name (Mapgen name) enum v7 v7,valleys,carpathian,v5,flat,fractal,singlenode,v6
+mg_name (Mapgen name) enum v7 v7,qcraft,valleys,carpathian,v5,flat,fractal,singlenode,v6
 
 #    Water surface level of the world.
 water_level (Water level) int 1 -31000 31000
@@ -1500,6 +1500,143 @@ mgv7_np_cave2 (Cave2 noise) noise_params_3d 0, 12, (67, 67, 67), 10325, 3, 0.5, 
 
 #    3D noise that determines number of dungeons per mapchunk.
 mgv7_np_dungeons (Dungeon noise) noise_params_3d 0.9, 0.5, (500, 500, 500), 0, 2, 0.8, 2.0
+
+[*Mapgen QCraft]
+
+#    Map generation attributes specific to Mapgen QCraft.
+#    'ridges': Rivers.
+#    'floatlands': Floating land masses in the atmosphere.
+#    'caverns': Giant caves deep underground.
+mgqcraft_spflags (Mapgen QCraft specific flags) flags mountains,ridges,nofloatlands,caverns mountains,ridges,floatlands,caverns
+
+#    Y of mountain density gradient zero level. Used to shift mountains vertically.
+mgqcraft_mount_zero_level (Mountain zero level) int 0 -31000 31000
+
+#    Lower Y limit of floatlands.
+mgqcraft_floatland_ymin (Floatland minimum Y) int 1024 -31000 31000
+
+#    Upper Y limit of floatlands.
+mgqcraft_floatland_ymax (Floatland maximum Y) int 4096 -31000 31000
+
+#    Y-distance over which floatlands taper from full density to nothing.
+#    Tapering starts at this distance from the Y limit.
+#    For a solid floatland layer, this controls the height of hills/mountains.
+#    Must be less than or equal to half the distance between the Y limits.
+mgqcraft_floatland_taper (Floatland tapering distance) int 256 0 32767
+
+#    Exponent of the floatland tapering. Alters the tapering behavior.
+#    Value = 1.0 creates a uniform, linear tapering.
+#    Values > 1.0 create a smooth tapering suitable for the default separated
+#    floatlands.
+#    Values < 1.0 (for example 0.25) create a more defined surface level with
+#    flatter lowlands, suitable for a solid floatland layer.
+mgqcraft_float_taper_exp (Floatland taper exponent) float 2.0
+
+#    Adjusts the density of the floatland layer.
+#    Increase value to increase density. Can be positive or negative.
+#    Value = 0.0: 50% of volume is floatland.
+#    Value = 2.0 (can be higher depending on 'mgqcraft_np_floatland', always test
+#    to be sure) creates a solid floatland layer.
+mgqcraft_floatland_density (Floatland density) float -0.6
+
+#    Surface level of optional water placed on a solid floatland layer.
+#    Water is disabled by default and will only be placed if this value is set
+#    to above 'mgqcraft_floatland_ymax' - 'mgqcraft_floatland_taper' (the start of the
+#    upper tapering).
+#    ***WARNING, POTENTIAL DANGER TO WORLDS AND SERVER PERFORMANCE***:
+#    When enabling water placement, floatlands must be configured and tested
+#    to be a solid layer by setting 'mgqcraft_floatland_density' to 2.0 (or other
+#    required value depending on 'mgqcraft_np_floatland'), to avoid
+#    server-intensive extreme water flow and to avoid vast flooding of the
+#    world surface below.
+mgqcraft_floatland_ywater (Floatland water level) int -31000 -31000 31000
+
+#    Controls width of tunnels, a smaller value creates wider tunnels.
+#    Value >= 10.0 completely disables generation of tunnels and avoids the
+#    intensive noise calculations.
+mgqcraft_cave_width (Cave width) float 0.09
+
+#    Y of upper limit of large caves.
+mgqcraft_large_cave_depth (Large cave depth) int -33 -31000 31000
+
+#    Minimum limit of random number of small caves per mapchunk.
+mgqcraft_small_cave_num_min (Small cave minimum number) int 0 0 256
+
+#    Maximum limit of random number of small caves per mapchunk.
+mgqcraft_small_cave_num_max (Small cave maximum number) int 0 0 256
+
+#    Minimum limit of random number of large caves per mapchunk.
+mgqcraft_large_cave_num_min (Large cave minimum number) int 0 0 64
+
+#    Maximum limit of random number of large caves per mapchunk.
+mgqcraft_large_cave_num_max (Large cave maximum number) int 2 0 64
+
+#    Proportion of large caves that contain liquid.
+mgqcraft_large_cave_flooded (Large cave proportion flooded) float 0.5 0.0 1.0
+
+#    Y-level of cavern upper limit.
+mgqcraft_cavern_limit (Cavern limit) int -256 -31000 31000
+
+#    Y-distance over which caverns expand to full size.
+mgqcraft_cavern_taper (Cavern taper) int 256 0 32767
+
+#    Defines full size of caverns, smaller values create larger caverns.
+mgqcraft_cavern_threshold (Cavern threshold) float 0.7
+
+#    Lower Y limit of dungeons.
+mgqcraft_dungeon_ymin (Dungeon minimum Y) int -31000 -31000 31000
+
+#    Upper Y limit of dungeons.
+mgqcraft_dungeon_ymax (Dungeon maximum Y) int 31000 -31000 31000
+
+[**Noises]
+
+#    Y-level of higher terrain that creates cliffs.
+mgqcraft_np_terrain_base (Terrain base noise) noise_params_2d 4, 70, (600, 600, 600), 82341, 5, 0.6, 2.0, eased
+
+#    Y-level of lower terrain and seabed.
+mgqcraft_np_terrain_alt (Terrain alternative noise) noise_params_2d 4, 25, (600, 600, 600), 5934, 5, 0.6, 2.0, eased
+
+#    Varies roughness of terrain.
+#    Defines the 'persistence' value for terrain_base and terrain_alt noises.
+mgqcraft_np_terrain_persist (Terrain persistence noise) noise_params_2d 0.6, 0.1, (2000, 2000, 2000), 539, 3, 0.6, 2.0, eased
+
+#    Defines distribution of higher terrain and steepness of cliffs.
+mgqcraft_np_height_select (Height select noise) noise_params_2d -8, 16, (500, 500, 500), 4213, 6, 0.7, 2.0, eased
+
+#    Variation of biome filler depth.
+mgqcraft_np_filler_depth (Filler depth noise) noise_params_2d 0, 1.2, (150, 150, 150), 261, 3, 0.7, 2.0, eased
+
+#    Variation of maximum mountain height (in nodes).
+mgqcraft_np_mount_height (Mountain height noise) noise_params_2d 256, 112, (1000, 1000, 1000), 72449, 3, 0.6, 2.0, eased
+
+#    Defines large-scale river channel structure.
+mgqcraft_np_ridge_uwater (Ridge underwater noise) noise_params_2d 0, 1, (1000, 1000, 1000), 85039, 5, 0.6, 2.0, eased
+
+#    3D noise defining mountain structure and height.
+#    Also defines structure of floatland mountain terrain.
+mgqcraft_np_mountain (Mountain noise) noise_params_3d -0.6, 1, (250, 350, 250), 5333, 5, 0.63, 2.0
+
+#    3D noise defining structure of river canyon walls.
+mgqcraft_np_ridge (Ridge noise) noise_params_3d 0, 1, (100, 100, 100), 6467, 4, 0.75, 2.0
+
+#    3D noise defining structure of floatlands.
+#    If altered from the default, the noise 'scale' (0.7 by default) may need
+#    to be adjusted, as floatland tapering functions best when this noise has
+#    a value range of approximately -2.0 to 2.0.
+mgqcraft_np_floatland (Floatland noise) noise_params_3d 0, 0.7, (384, 96, 384), 1009, 4, 0.75, 1.618
+
+#    3D noise defining giant caverns.
+mgqcraft_np_cavern (Cavern noise) noise_params_3d 0, 1, (384, 128, 384), 723, 5, 0.63, 2.0
+
+#    First of two 3D noises that together define tunnels.
+mgqcraft_np_cave1 (Cave1 noise) noise_params_3d 0, 12, (61, 61, 61), 52534, 3, 0.5, 2.0
+
+#    Second of two 3D noises that together define tunnels.
+mgqcraft_np_cave2 (Cave2 noise) noise_params_3d 0, 12, (67, 67, 67), 10325, 3, 0.5, 2.0
+
+#    3D noise that determines number of dungeons per mapchunk.
+mgqcraft_np_dungeons (Dungeon noise) noise_params_3d 0.9, 0.5, (500, 500, 500), 0, 2, 0.8, 2.0
 
 [*Mapgen Carpathian]
 

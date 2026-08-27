@@ -27,6 +27,7 @@
 #include "mapgen_v5.h"
 #include "mapgen_v6.h"
 #include "mapgen_v7.h"
+#include "mapgen_qcraft.h"
 #include "mapgen_valleys.h"
 #include "mapgen_singlenode.h"
 #include "cavegen.h"
@@ -71,6 +72,7 @@ struct MapgenDesc {
 // The order of 'enum MapgenType' in mapgen.h must match this order.
 static MapgenDesc g_reg_mapgens[] = {
 	{"v7",         true},
+	{"qcraft",     true},
 	{"valleys",    true},
 	{"carpathian", true},
 	{"v5",         true},
@@ -163,6 +165,8 @@ Mapgen *Mapgen::createMapgen(MapgenType mgtype, MapgenParams *params,
 		return new MapgenV6((MapgenV6Params *)params, emerge);
 	case MAPGEN_V7:
 		return new MapgenV7((MapgenV7Params *)params, emerge);
+	case MAPGEN_QCRAFT:
+		return new MapgenQCraft((MapgenQCraftParams *)params, emerge);
 	case MAPGEN_VALLEYS:
 		return new MapgenValleys((MapgenValleysParams *)params, emerge);
 	default:
@@ -188,6 +192,8 @@ MapgenParams *Mapgen::createMapgenParams(MapgenType mgtype)
 		return new MapgenV6Params;
 	case MAPGEN_V7:
 		return new MapgenV7Params;
+	case MAPGEN_QCRAFT:
+		return new MapgenQCraftParams;
 	case MAPGEN_VALLEYS:
 		return new MapgenValleysParams;
 	default:
