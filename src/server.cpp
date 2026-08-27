@@ -19,6 +19,7 @@
 #include "itemdef.h"
 #include "log.h"
 #include "mapblock.h"
+#include "microblocks.h"
 #include "nodedef.h"
 #include "particles.h"
 #include "profiler.h"
@@ -485,6 +486,33 @@ void Server::init()
 				m_gamespec, false);
 	} catch (const BaseException &e) {
 		throw ServerError(std::string("Failed to initialize world: ") + e.what());
+	}
+
+	{
+		Settings world_mt;
+		const std::string world_mt_path = m_path_world + DIR_DELIM "world.mt";
+		u16 subdivision = 4;
+		if (world_mt.readConfigFile(world_mt_path.c_str()) &&
+				world_mt.exists("qcraft_subdivision"))
+			subdivision = (u16)world_mt.getU16("qcraft_subdivision");
+
+		if (!microSubdivisionSupported((u8)subdivision)) {
+			throw ServerError("unsupported microblock subdivision: " +
+					itos(subdivision));
+		}
+
+		const MicroGeometry geom = microGeometryFor((u8)subdivision);
+		const u32 pool_bytes =
+				(u32)g_settings->getU16("qcraft_micro_pool_mb") * 1024u * 1024u;
+		const u32 stride =
+				MICRO_TILE_HEADER + (u32)MICRO_TILE_NODES * geom.bytes_per_node;
+		m_micro_pool = std::make_unique<MicroTilePool>(geom, pool_bytes / stride);
+
+		// actionstream, not infostream: INFO is not printed at the default log
+		// level, and the world test greps the server's output for this line.
+		actionstream << "Server: microblock pool of "
+				<< m_micro_pool->capacity() << " tiles, subdivision "
+				<< (int)geom.n << std::endl;
 	}
 
 	// Create emerge manager

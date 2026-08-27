@@ -332,6 +332,7 @@ public:
 	ICraftDefManager* getCraftDefManager() override;
 	u16 allocateUnknownNodeId(const std::string &name) override;
 	IRollbackManager *getRollbackManager() override { return m_rollback; }
+	MicroTilePool *getMicroPool() override { return m_micro_pool.get(); }
 	EmergeManager *getEmergeManager() { return m_emerge.get(); }
 	ModStorageDatabase *getModStorageDatabase() override { return m_mod_storage_database; }
 
@@ -791,6 +792,8 @@ private:
 
 	ModStorageDatabase *m_mod_storage_database = nullptr;
 	float m_mod_storage_save_timer = 10.0f;
+
+	std::unique_ptr<MicroTilePool> m_micro_pool;
 
 	// CSM restrictions byteflag
 	u64 m_csm_restriction_flags = CSMRestrictionFlags::CSM_RF_NONE;
