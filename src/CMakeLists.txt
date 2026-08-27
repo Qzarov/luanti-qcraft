@@ -499,6 +499,7 @@ set(common_SRCS
 	mapblock.cpp
 	mapnode.cpp
 	mapsector.cpp
+	microblocks.cpp
 	nodedef.cpp
 	pathfinder.cpp
 	player.cpp
