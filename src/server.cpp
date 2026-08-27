@@ -496,17 +496,27 @@ void Server::init()
 				world_mt.exists("qcraft_subdivision"))
 			subdivision = (u16)world_mt.getU16("qcraft_subdivision");
 
-		if (!microSubdivisionSupported((u8)subdivision)) {
+		// Validate the untruncated u16 before narrowing: a value like 258 or
+		// 260 would otherwise truncate to 2 or 4 when cast to u8 and be
+		// silently accepted as a valid world. The refusal below reports the
+		// original value, not the truncated one.
+		if (subdivision > 0xFF || !microSubdivisionSupported((u8)subdivision)) {
 			throw ServerError("unsupported microblock subdivision: " +
 					itos(subdivision));
 		}
 
 		const MicroGeometry geom = microGeometryFor((u8)subdivision);
-		const u32 pool_bytes =
-				(u32)g_settings->getU16("qcraft_micro_pool_mb") * 1024u * 1024u;
+		const u16 pool_mb = g_settings->getU16("qcraft_micro_pool_mb");
+		// u64 so a pool_mb of 4096 or more cannot wrap a u32 product.
+		const u64 pool_bytes = (u64)pool_mb * 1024ull * 1024ull;
 		const u32 stride =
 				MICRO_TILE_HEADER + (u32)MICRO_TILE_NODES * geom.bytes_per_node;
-		m_micro_pool = std::make_unique<MicroTilePool>(geom, pool_bytes / stride);
+		const u64 tile_count = pool_bytes / stride;
+		if (tile_count == 0) {
+			throw ServerError("qcraft_micro_pool_mb is too small to hold a "
+					"single microblock tile: " + itos(pool_mb));
+		}
+		m_micro_pool = std::make_unique<MicroTilePool>(geom, (u32)tile_count);
 
 		// actionstream, not infostream: INFO is not printed at the default log
 		// level, and the world test greps the server's output for this line.
