@@ -74,3 +74,48 @@ inline u16 microSubIndex(const MicroGeometry &g, v3s16 sub)
 {
 	return (u16)((sub.Z * g.n + sub.Y) * g.n + sub.X);
 }
+
+#include <vector>
+
+/*
+	One contiguous allocation handed out as fixed-size tiles. Carving never
+	calls the allocator: the storage and the freelist are sized once, at world
+	load, when N is known.
+*/
+class MicroTilePool
+{
+public:
+	//! tile_count is clamped to MICRO_NO_TILE - 1, since indices are u16.
+	MicroTilePool(MicroGeometry geom, u32 tile_count);
+
+	//! Returns MICRO_NO_TILE when the pool is full. The tile is zeroed and its
+	//! palette holds CONTENT_AIR in slot 0.
+	u16 allocate();
+	void release(u16 tile);
+
+	content_t *palette(u16 tile);
+	const content_t *palette(u16 tile) const;
+	u8 *nibbles(u16 tile);
+	const u8 *nibbles(u16 tile) const;
+
+	//! Used palette slots of a tile, at least 1.
+	u8 &paletteUsed(u16 tile);
+	u8 paletteUsed(u16 tile) const;
+
+	u32 capacity() const { return m_capacity; }
+	u32 used() const { return m_used; }
+	u32 tileStride() const { return m_stride; }
+	const MicroGeometry &geometry() const { return m_geom; }
+
+private:
+	u8 *tileAt(u16 tile);
+	const u8 *tileAt(u16 tile) const;
+	void resetTile(u16 tile);
+
+	MicroGeometry m_geom;
+	u32 m_capacity;
+	u32 m_stride;
+	u32 m_used = 0;
+	std::vector<u8> m_storage;
+	std::vector<u16> m_free;
+};
