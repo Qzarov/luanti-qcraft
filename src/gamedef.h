@@ -17,6 +17,7 @@ class ModStorageDatabase;
 struct SubgameSpec;
 struct ModSpec;
 struct ModIPCStore;
+class MicroTilePool;
 
 /*
 	An interface for fetching game-global definitions like tool and
@@ -40,6 +41,9 @@ public:
 
 	// Only usable on server.
 	virtual ModIPCStore *getModIPCStore() { return nullptr; }
+
+	// Microblock tile pool, or nullptr where microblocks are not configured.
+	virtual MicroTilePool *getMicroPool() { return nullptr; }
 
 	// Shorthands
 	// TODO: these should be made const-safe so that a const IGameDef* is

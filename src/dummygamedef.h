@@ -10,6 +10,7 @@
 #include <memory>
 #include "nodedef.h"
 #include "craftdef.h"
+#include "microblocks.h"
 #include "content/mods.h"
 #include "database/database-dummy.h"
 #if CHECK_CLIENT_BUILD()
@@ -60,6 +61,12 @@ public:
 		return false;
 	}
 	ModChannel *getModChannel(const std::string &channel) override { return nullptr; }
+
+	MicroTilePool *getMicroPool() override { return &m_micro_pool; }
+
+private:
+	// Enough tiles for a few carved mapblocks in tests.
+	MicroTilePool m_micro_pool{microGeometryFor(4), 256};
 
 protected:
 	IItemDefManager *m_itemdef = nullptr;

@@ -7,6 +7,7 @@
 #include "gamedef.h"
 #include "nodedef.h"
 #include "mapblock.h"
+#include "microblocks.h"
 #include "serialization.h"
 #include "noise.h"
 #include "inventory.h"
@@ -38,6 +39,8 @@ public:
 
 	// Tests blocks with a single recurring node
 	void testMonoblock(IGameDef *gamedef);
+
+	void testMicroSaveLoad(IGameDef *gamedef);
 };
 
 static TestMapBlock g_test_instance;
@@ -51,6 +54,7 @@ void TestMapBlock::runTests(IGameDef *gamedef)
 	TEST(testLoad20, gamedef);
 	TEST(testLoadNonStd, gamedef);
 	TEST(testMonoblock, gamedef);
+	TEST(testMicroSaveLoad, gamedef);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -470,4 +474,42 @@ void TestMapBlock::testLoadNonStd(IGameDef *gamedef)
 		UASSERTEQ(int, block.getNodeNoEx({i, 0, 0}).param2, data_hi[i]);
 	for (s16 i = 0; i < 16; i++)
 		UASSERTEQ(int, block.getNodeNoEx({i, 1, 0}).param2, data_lo[i]);
+}
+
+void TestMapBlock::testMicroSaveLoad(IGameDef *gamedef)
+{
+	MicroTilePool *pool = gamedef->getMicroPool();
+	UASSERT(pool != nullptr);
+
+	// t_CONTENT_STONE is registered by the test harness in test.cpp.
+	const content_t c_stone = t_CONTENT_STONE;
+
+	MapBlock block({}, gamedef);
+	block.setNode(v3s16(1, 2, 3), MapNode(c_stone));
+	UASSERT(block.m_micro.setSub(*pool, v3s16(1, 2, 3), 5, c_stone));
+	UASSERT(block.m_micro.setSub(*pool, v3s16(6, 2, 3), 0, c_stone));
+
+	std::ostringstream os(std::ios_base::binary);
+	block.serialize(os, SER_FMT_VER_HIGHEST_WRITE, true, -1);
+
+	MapBlock reloaded({}, gamedef);
+	std::istringstream is(os.str(), std::ios_base::binary);
+	reloaded.deSerialize(is, SER_FMT_VER_HIGHEST_WRITE, true);
+
+	// Registering carved palette materials into the block's id mapping must
+	// not disturb ordinary bulk nodes that were never carved. An ordinary
+	// node keeps its content...
+	UASSERTEQ(int, reloaded.getNodeNoEx(v3s16(1, 2, 3)).getContent(), c_stone);
+	// ...and so does the untouched CONTENT_IGNORE background.
+	UASSERTEQ(int, reloaded.getNodeNoEx(v3s16(0, 0, 0)).getContent(), CONTENT_IGNORE);
+
+	// The carving survives, and the material keeps its identity.
+	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(1, 2, 3), 5), c_stone);
+	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(1, 2, 3), 4), CONTENT_AIR);
+	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(6, 2, 3), 0), c_stone);
+	// Untouched tiles are still absent rather than allocated on load.
+	UASSERTEQ(int, reloaded.m_micro.tileAt(v3s16(12, 12, 12)), MICRO_NO_TILE);
+
+	reloaded.m_micro.clear(*pool);
+	block.m_micro.clear(*pool);
 }

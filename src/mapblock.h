@@ -12,6 +12,7 @@
 #include "staticobject.h"
 #include "nodemetadata.h" // NodeMetadataList
 #include "nodetimer.h"
+#include "microblocks.h"
 #include "modifiedstate.h"
 #include "util/numeric.h" // getContainerPos
 
@@ -442,9 +443,17 @@ private:
 	void expandNodesIfNeeded();
 	void reallocate(u32 count, MapNode n);
 
-	static void getBlockNodeIdMapping(NameIdMapping *nimap, MapNode *nodes,
-		u32 count, const NodeDefManager *nodedef);
-	static void correctBlockNodeIds(const NameIdMapping *nimap, MapNode *nodes,
+	// Renumbers node ids to this block's local numbering, and (if pool and
+	// micro_palettes are non-null and the block has carvings) does the same
+	// for microblock palette materials in the same pass, sharing the same
+	// IdIdMapping and id counter so a material reuses the local id a node
+	// already got for it. Never mutates the pool; translated palette values
+	// are written into *micro_palettes, one entry per directory slot.
+	void getBlockNodeIdMapping(NameIdMapping *nimap, MapNode *nodes,
+		u32 count, const NodeDefManager *nodedef,
+		const MicroTilePool *pool = nullptr,
+		std::vector<std::vector<content_t>> *micro_palettes = nullptr);
+	void correctBlockNodeIds(const NameIdMapping *nimap, MapNode *nodes,
 			IGameDef *gamedef);
 
 	/*
@@ -557,6 +566,7 @@ private:
 public:
 	NodeMetadataList m_node_metadata;
 	StaticObjectList m_static_objects;
+	MicroLayer m_micro;
 
 private:
 	NodeTimerList m_node_timers;

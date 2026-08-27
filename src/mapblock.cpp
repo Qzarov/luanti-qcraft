@@ -319,7 +319,8 @@ void MapBlock::expireIsAirCache()
 // Note that there's no technical reason why we *have to* renumber the IDs,
 // but we do it anyway as it also helps compressability.
 void MapBlock::getBlockNodeIdMapping(NameIdMapping *nimap, MapNode *nodes,
-	u32 count, const NodeDefManager *nodedef)
+	u32 count, const NodeDefManager *nodedef,
+	const MicroTilePool *pool, std::vector<std::vector<content_t>> *micro_palettes)
 {
 	IdIdMapping &mapping = IdIdMapping::giveClearedThreadLocalInstance();
 
@@ -342,6 +343,39 @@ void MapBlock::getBlockNodeIdMapping(NameIdMapping *nimap, MapNode *nodes,
 
 		// Update the MapNode
 		nodes[i].setContent(id);
+	}
+
+	// Palette materials share this block's local numbering with the node
+	// array above: a material reuses the local id a node already got for
+	// it, or is handed the next new one, via the same IdIdMapping and the
+	// same id_counter. The pool is read-only here; the pool itself holds
+	// session-global ids and is never rewritten. Translated ids are written
+	// into *micro_palettes for the caller to serialize, exactly like
+	// tmp_nodes holds the translated node array without touching `data`.
+	if (pool && micro_palettes && !m_micro.empty()) {
+		const std::vector<u16> &dir = m_micro.directory();
+		micro_palettes->assign(MICRO_TILES_PER_BLOCK, {});
+		for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++) {
+			const u16 tile = dir[slot];
+			if (tile == MICRO_NO_TILE)
+				continue;
+			const u8 used = pool->paletteUsed(tile);
+			const content_t *palette = pool->palette(tile);
+			std::vector<content_t> &out = (*micro_palettes)[slot];
+			out.resize(used);
+			for (u8 i = 0; i < used; i++) {
+				content_t global_id = palette[i];
+				content_t id;
+				if (auto found = mapping.get(global_id); found != 0xFFFF) {
+					id = found;
+				} else {
+					id = id_counter++;
+					mapping.set(global_id, id);
+					nimap->set(id, nodedef->get(global_id).name);
+				}
+				out[i] = id;
+			}
+		}
 	}
 }
 
@@ -383,6 +417,24 @@ void MapBlock::correctBlockNodeIds(const NameIdMapping *nimap, MapNode *nodes,
 		// Save previous node local_id & global_id result
 		mapping_cache.set(local_id, global_id);
 	}
+
+	MicroTilePool *pool = gamedef->getMicroPool();
+	if (pool && !m_micro.empty()) {
+		const NodeDefManager *nodedef = gamedef->ndef();
+		for (u16 tile : m_micro.directory()) {
+			if (tile == MICRO_NO_TILE)
+				continue;
+			const u8 used = pool->paletteUsed(tile);
+			for (u8 i = 0; i < used; i++) {
+				std::string name;
+				if (!nimap->getName(pool->palette(tile)[i], name))
+					continue;
+				content_t local_id;
+				if (nodedef->getId(name, local_id))
+					pool->palette(tile)[i] = local_id;
+			}
+		}
+	}
 }
 
 void MapBlock::serialize(std::ostream &os_compressed, u8 version, bool disk, int compression_level)
@@ -415,6 +467,10 @@ void MapBlock::serialize(std::ostream &os_compressed, u8 version, bool disk, int
 		Bulk node data
 	*/
 	NameIdMapping nimap;
+	// Translated (block-local) microblock palette ids, one entry per
+	// directory slot, filled in by getBlockNodeIdMapping below. Only
+	// populated when disk is true; the live pool is never touched.
+	std::vector<std::vector<content_t>> micro_palettes;
 	Buffer<u8> buf;
 	const u8 content_width = 2;
 	const u8 params_width = 2;
@@ -423,7 +479,8 @@ void MapBlock::serialize(std::ostream &os_compressed, u8 version, bool disk, int
 		const size_t size = m_is_mono_block ? 1 : nodecount;
 		std::unique_ptr<MapNode[]> tmp_nodes(new MapNode[size]);
 		std::copy_n(data, size, tmp_nodes.get());
-		getBlockNodeIdMapping(&nimap, tmp_nodes.get(), size, m_gamedef->ndef());
+		getBlockNodeIdMapping(&nimap, tmp_nodes.get(), size, m_gamedef->ndef(),
+				m_gamedef->getMicroPool(), &micro_palettes);
 
 		buf = MapNode::serializeBulk(version, tmp_nodes.get(), nodecount,
 				content_width, params_width, m_is_mono_block);
@@ -460,6 +517,43 @@ void MapBlock::serialize(std::ostream &os_compressed, u8 version, bool disk, int
 		m_node_metadata.serialize(os_raw, version, disk);
 		// prior to 29 node data was compressed individually
 		compress(os_raw.str(), os, version, compression_level);
+	}
+
+	/*
+		Microblock layer
+	*/
+	if (version >= 30) {
+		MicroTilePool *pool = m_gamedef->getMicroPool();
+		const bool present = pool && !m_micro.empty();
+		writeU8(os, present ? 1 : 0);
+		if (present) {
+			writeU8(os, pool->geometry().n);
+			const std::vector<u16> &dir = m_micro.directory();
+			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++)
+				writeU16(os, dir[slot]);
+
+			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++) {
+				const u16 tile = dir[slot];
+				if (tile == MICRO_NO_TILE)
+					continue;
+				const u8 used = pool->paletteUsed(tile);
+				writeU8(os, used);
+				if (disk) {
+					// Translated into this block's local numbering by
+					// getBlockNodeIdMapping above, alongside the node
+					// array. The live pool holds session-global ids and
+					// must never be written to disk directly.
+					const std::vector<content_t> &translated = micro_palettes[slot];
+					for (u8 i = 0; i < used; i++)
+						writeU16(os, translated[i]);
+				} else {
+					for (u8 i = 0; i < used; i++)
+						writeU16(os, pool->palette(tile)[i]);
+				}
+				os.write(reinterpret_cast<const char *>(pool->nibbles(tile)),
+						(size_t)MICRO_TILE_NODES * pool->geometry().bytes_per_node);
+			}
+		}
 	}
 
 	/*
@@ -591,6 +685,46 @@ void MapBlock::deSerialize(std::istream &in_compressed, u8 version, bool disk)
 			warningstream<<"MapBlock::deSerialize(): Ignoring an error"
 					<<" while deserializing node metadata at ("
 					<<getPos()<<": "<<e.what()<<std::endl;
+		}
+	}
+
+	/*
+		Microblock layer
+	*/
+	if (version >= 30) {
+		const u8 present = readU8(is);
+		if (present) {
+			MicroTilePool *pool = m_gamedef->getMicroPool();
+			const u8 n = readU8(is);
+			if (!pool || pool->geometry().n != n)
+				throw SerializationError("MapBlock::deSerialize(): "
+						"microblock subdivision does not match the world");
+
+			std::vector<u16> stored(MICRO_TILES_PER_BLOCK);
+			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++)
+				stored[slot] = readU16(is);
+
+			m_micro.clear(*pool);
+			m_micro.directory().assign(MICRO_TILES_PER_BLOCK, MICRO_NO_TILE);
+
+			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++) {
+				if (stored[slot] == MICRO_NO_TILE)
+					continue;
+				const u16 tile = pool->allocate();
+				if (tile == MICRO_NO_TILE)
+					throw SerializationError("MapBlock::deSerialize(): "
+							"microblock pool exhausted while loading");
+				const u8 used = readU8(is);
+				if (used == 0 || used > MICRO_PALETTE_SLOTS)
+					throw SerializationError("MapBlock::deSerialize(): "
+							"bad microblock palette size");
+				for (u8 i = 0; i < used; i++)
+					pool->palette(tile)[i] = readU16(is);
+				pool->paletteUsed(tile) = used;
+				is.read(reinterpret_cast<char *>(pool->nibbles(tile)),
+						(size_t)MICRO_TILE_NODES * pool->geometry().bytes_per_node);
+				m_micro.directory()[slot] = tile;
+			}
 		}
 	}
 
