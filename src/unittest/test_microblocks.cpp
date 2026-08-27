@@ -21,6 +21,9 @@ public:
 	void testPoolExhaustion();
 	void testPoolDoubleRelease();
 	void testPoolReleaseNeverAllocated();
+	void testLayer();
+	void testLayerPaletteFull();
+	void testLayerPoolExhausted();
 };
 
 static TestMicroblocks g_test_instance;
@@ -35,6 +38,9 @@ void TestMicroblocks::runTests(IGameDef *gamedef)
 	TEST(testPoolExhaustion);
 	TEST(testPoolDoubleRelease);
 	TEST(testPoolReleaseNeverAllocated);
+	TEST(testLayer);
+	TEST(testLayerPaletteFull);
+	TEST(testLayerPoolExhausted);
 }
 
 void TestMicroblocks::testGeometry()
@@ -176,4 +182,75 @@ void TestMicroblocks::testPoolReleaseNeverAllocated()
 	UASSERT(a != b);
 	UASSERTEQ(u32, pool.used(), 2);
 	UASSERTEQ(int, pool.allocate(), MICRO_NO_TILE);
+}
+
+void TestMicroblocks::testLayer()
+{
+	MicroTilePool pool(microGeometryFor(4), 8);
+	MicroLayer layer;
+	UASSERT(layer.empty());
+
+	// An untouched node reports CONTENT_IGNORE, which is distinct from air.
+	UASSERTEQ(int, layer.getSub(pool, v3s16(1, 2, 3), 0), CONTENT_IGNORE);
+
+	UASSERT(layer.setSub(pool, v3s16(1, 2, 3), 5, 42));
+	UASSERT(!layer.empty());
+	UASSERTEQ(int, layer.getSub(pool, v3s16(1, 2, 3), 5), 42);
+	// Neighbouring sub-cubes of the same node stay air.
+	UASSERTEQ(int, layer.getSub(pool, v3s16(1, 2, 3), 4), CONTENT_AIR);
+	UASSERTEQ(int, layer.getSub(pool, v3s16(1, 2, 3), 6), CONTENT_AIR);
+
+	// Nibble packing must not bleed between adjacent sub-cubes.
+	UASSERT(layer.setSub(pool, v3s16(1, 2, 3), 6, 77));
+	UASSERTEQ(int, layer.getSub(pool, v3s16(1, 2, 3), 5), 42);
+	UASSERTEQ(int, layer.getSub(pool, v3s16(1, 2, 3), 6), 77);
+
+	// A node in the same 4x4x4 cube shares the tile.
+	UASSERTEQ(int, layer.tileAt(v3s16(0, 0, 0)), layer.tileAt(v3s16(3, 3, 3)));
+	UASSERTEQ(u32, pool.used(), 1);
+	// A node in the next cube takes another tile.
+	UASSERT(layer.setSub(pool, v3s16(4, 2, 3), 0, 42));
+	UASSERTEQ(u32, pool.used(), 2);
+	UASSERT(layer.tileAt(v3s16(1, 2, 3)) != layer.tileAt(v3s16(4, 2, 3)));
+
+	// Each tile carries its own palette: the second one holds air plus 42 only.
+	UASSERTEQ(int, pool.paletteUsed(layer.tileAt(v3s16(4, 2, 3))), 2);
+
+	// A material already in the palette reuses its slot instead of adding one.
+	UASSERTEQ(int, pool.paletteUsed(layer.tileAt(v3s16(1, 2, 3))), 3);
+	UASSERT(layer.setSub(pool, v3s16(1, 2, 3), 7, 42));
+	UASSERTEQ(int, pool.paletteUsed(layer.tileAt(v3s16(1, 2, 3))), 3);
+	UASSERTEQ(int, layer.getSub(pool, v3s16(1, 2, 3), 7), 42);
+
+	layer.clear(pool);
+	UASSERT(layer.empty());
+	UASSERTEQ(u32, pool.used(), 0);
+}
+
+void TestMicroblocks::testLayerPaletteFull()
+{
+	MicroTilePool pool(microGeometryFor(4), 2);
+	MicroLayer layer;
+
+	// Slot 0 is air, so fifteen materials fit and the sixteenth is refused.
+	for (content_t c = 1; c <= 15; c++)
+		UASSERT(layer.setSub(pool, v3s16(0, 0, 0), c, c));
+	UASSERT(!layer.setSub(pool, v3s16(0, 0, 0), 20, 200));
+
+	// The refusal must not corrupt what was already written.
+	UASSERTEQ(int, layer.getSub(pool, v3s16(0, 0, 0), 1), 1);
+	UASSERTEQ(int, layer.getSub(pool, v3s16(0, 0, 0), 15), 15);
+	UASSERTEQ(int, layer.getSub(pool, v3s16(0, 0, 0), 20), CONTENT_AIR);
+}
+
+void TestMicroblocks::testLayerPoolExhausted()
+{
+	MicroTilePool pool(microGeometryFor(4), 1);
+	MicroLayer layer;
+
+	UASSERT(layer.setSub(pool, v3s16(0, 0, 0), 0, 42));
+	// The second tile cannot be allocated, so the write is refused, not queued.
+	UASSERT(!layer.setSub(pool, v3s16(4, 0, 0), 0, 42));
+	UASSERTEQ(int, layer.tileAt(v3s16(4, 0, 0)), MICRO_NO_TILE);
+	UASSERTEQ(int, layer.getSub(pool, v3s16(0, 0, 0), 0), 42);
 }

@@ -130,3 +130,97 @@ const u8 *MicroTilePool::nibbles(u16 tile) const
 {
 	return tileAt(tile) + MICRO_TILE_HEADER;
 }
+
+namespace
+{
+	//! Position of a sub-cube inside a tile's nibble stream.
+	inline u32 nibbleIndex(const MicroGeometry &g, u16 node_in_tile, u16 sub)
+	{
+		return (u32)node_in_tile * g.sub_count + sub;
+	}
+
+	inline u8 readNibble(const u8 *bytes, u32 index)
+	{
+		const u8 byte = bytes[index >> 1];
+		return (index & 1) ? (u8)(byte >> 4) : (u8)(byte & 0x0F);
+	}
+
+	inline void writeNibble(u8 *bytes, u32 index, u8 value)
+	{
+		u8 &byte = bytes[index >> 1];
+		if (index & 1)
+			byte = (u8)((byte & 0x0F) | (value << 4));
+		else
+			byte = (u8)((byte & 0xF0) | (value & 0x0F));
+	}
+}
+
+u16 MicroLayer::tileAt(v3s16 relp) const
+{
+	if (m_directory.empty())
+		return MICRO_NO_TILE;
+	return m_directory[microTileSlot(relp)];
+}
+
+content_t MicroLayer::getSub(const MicroTilePool &pool, v3s16 relp, u16 sub) const
+{
+	const u16 tile = tileAt(relp);
+	if (tile == MICRO_NO_TILE)
+		return CONTENT_IGNORE;
+
+	const MicroGeometry &g = pool.geometry();
+	const u32 index = nibbleIndex(g, microNodeInTile(relp), sub);
+	const u8 slot = readNibble(pool.nibbles(tile), index);
+	return pool.palette(tile)[slot];
+}
+
+bool MicroLayer::setSub(MicroTilePool &pool, v3s16 relp, u16 sub, content_t c)
+{
+	const u16 slot_index = microTileSlot(relp);
+
+	if (m_directory.empty())
+		m_directory.assign(MICRO_TILES_PER_BLOCK, MICRO_NO_TILE);
+
+	u16 tile = m_directory[slot_index];
+	bool allocated_here = false;
+	if (tile == MICRO_NO_TILE) {
+		tile = pool.allocate();
+		if (tile == MICRO_NO_TILE)
+			return false;
+		allocated_here = true;
+	}
+
+	// Find the material in the palette, or add it.
+	content_t *palette = pool.palette(tile);
+	u8 &used = pool.paletteUsed(tile);
+	u8 found = MICRO_PALETTE_SLOTS;
+	for (u8 i = 0; i < used; i++) {
+		if (palette[i] == c) {
+			found = i;
+			break;
+		}
+	}
+	if (found == MICRO_PALETTE_SLOTS) {
+		if (used >= MICRO_PALETTE_SLOTS) {
+			// Roll back a tile allocated only for this refused write.
+			if (allocated_here)
+				pool.release(tile);
+			return false;
+		}
+		found = used;
+		palette[used] = c;
+		used++;
+	}
+
+	const MicroGeometry &g = pool.geometry();
+	writeNibble(pool.nibbles(tile), nibbleIndex(g, microNodeInTile(relp), sub), found);
+	m_directory[slot_index] = tile;
+	return true;
+}
+
+void MicroLayer::clear(MicroTilePool &pool)
+{
+	for (u16 tile : m_directory)
+		pool.release(tile);
+	m_directory.clear();
+}

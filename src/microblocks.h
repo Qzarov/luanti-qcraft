@@ -130,3 +130,32 @@ private:
 	//! the constructor alongside m_storage and m_free.
 	std::vector<bool> m_in_use;
 };
+
+/*
+	The carved nodes of one mapblock. The directory is either empty, meaning
+	nothing in this mapblock was ever carved, or holds one entry per tile.
+	It is allocated once and never grows.
+*/
+class MicroLayer
+{
+public:
+	bool empty() const { return m_directory.empty(); }
+
+	//! MICRO_NO_TILE when the node's tile was never allocated.
+	u16 tileAt(v3s16 relp) const;
+
+	//! CONTENT_IGNORE when the node is not carved.
+	content_t getSub(const MicroTilePool &pool, v3s16 relp, u16 sub) const;
+
+	//! False when the pool is exhausted or the tile palette is full. On false
+	//! nothing is written.
+	bool setSub(MicroTilePool &pool, v3s16 relp, u16 sub, content_t c);
+
+	void clear(MicroTilePool &pool);
+
+	const std::vector<u16> &directory() const { return m_directory; }
+	std::vector<u16> &directory() { return m_directory; }
+
+private:
+	std::vector<u16> m_directory;
+};
