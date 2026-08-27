@@ -480,6 +480,7 @@ void TestMapBlock::testMicroSaveLoad(IGameDef *gamedef)
 {
 	MicroTilePool *pool = gamedef->getMicroPool();
 	UASSERT(pool != nullptr);
+	UASSERTEQ(u32, pool->used(), 0);
 
 	// t_CONTENT_STONE is registered by the test harness in test.cpp.
 	const content_t c_stone = t_CONTENT_STONE;
@@ -489,35 +490,44 @@ void TestMapBlock::testMicroSaveLoad(IGameDef *gamedef)
 	// round trip, and where a reuse-versus-new-local-id mistake would land.
 	const content_t c_grass = t_CONTENT_GRASS;
 
-	MapBlock block({}, gamedef);
-	block.setNode(v3s16(1, 2, 3), MapNode(c_stone));
-	UASSERT(block.m_micro.setSub(*pool, v3s16(1, 2, 3), 5, c_stone));
-	UASSERT(block.m_micro.setSub(*pool, v3s16(6, 2, 3), 0, c_stone));
-	UASSERT(block.m_micro.setSub(*pool, v3s16(9, 2, 3), 0, c_grass));
+	// Scoped so both blocks are destroyed naturally at the closing brace,
+	// exercising MapBlock's destructor path (which releases m_micro's tiles
+	// back to the pool) instead of clearing the layers by hand. A manual
+	// clear here would keep passing even if that destructor path leaked a
+	// tile on load, since nothing would notice until the pool ran dry.
+	{
+		MapBlock block({}, gamedef);
+		block.setNode(v3s16(1, 2, 3), MapNode(c_stone));
+		UASSERT(block.m_micro.setSub(*pool, v3s16(1, 2, 3), 5, c_stone));
+		UASSERT(block.m_micro.setSub(*pool, v3s16(6, 2, 3), 0, c_stone));
+		UASSERT(block.m_micro.setSub(*pool, v3s16(9, 2, 3), 0, c_grass));
 
-	std::ostringstream os(std::ios_base::binary);
-	block.serialize(os, SER_FMT_VER_HIGHEST_WRITE, true, -1);
+		std::ostringstream os(std::ios_base::binary);
+		block.serialize(os, SER_FMT_VER_HIGHEST_WRITE, true, -1);
 
-	MapBlock reloaded({}, gamedef);
-	std::istringstream is(os.str(), std::ios_base::binary);
-	reloaded.deSerialize(is, SER_FMT_VER_HIGHEST_WRITE, true);
+		MapBlock reloaded({}, gamedef);
+		std::istringstream is(os.str(), std::ios_base::binary);
+		reloaded.deSerialize(is, SER_FMT_VER_HIGHEST_WRITE, true);
 
-	// Registering carved palette materials into the block's id mapping must
-	// not disturb ordinary bulk nodes that were never carved. An ordinary
-	// node keeps its content...
-	UASSERTEQ(int, reloaded.getNodeNoEx(v3s16(1, 2, 3)).getContent(), c_stone);
-	// ...and so does the untouched CONTENT_IGNORE background.
-	UASSERTEQ(int, reloaded.getNodeNoEx(v3s16(0, 0, 0)).getContent(), CONTENT_IGNORE);
+		// Registering carved palette materials into the block's id mapping
+		// must not disturb ordinary bulk nodes that were never carved. An
+		// ordinary node keeps its content...
+		UASSERTEQ(int, reloaded.getNodeNoEx(v3s16(1, 2, 3)).getContent(), c_stone);
+		// ...and so does the untouched CONTENT_IGNORE background.
+		UASSERTEQ(int, reloaded.getNodeNoEx(v3s16(0, 0, 0)).getContent(), CONTENT_IGNORE);
 
-	// The carving survives, and the material keeps its identity.
-	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(1, 2, 3), 5), c_stone);
-	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(1, 2, 3), 4), CONTENT_AIR);
-	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(6, 2, 3), 0), c_stone);
-	// The palette-only material survives too, as itself.
-	UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(9, 2, 3), 0), c_grass);
-	// Untouched tiles are still absent rather than allocated on load.
-	UASSERTEQ(int, reloaded.m_micro.tileAt(v3s16(12, 12, 12)), MICRO_NO_TILE);
+		// The carving survives, and the material keeps its identity.
+		UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(1, 2, 3), 5), c_stone);
+		UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(1, 2, 3), 4), CONTENT_AIR);
+		UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(6, 2, 3), 0), c_stone);
+		// The palette-only material survives too, as itself.
+		UASSERTEQ(int, reloaded.m_micro.getSub(*pool, v3s16(9, 2, 3), 0), c_grass);
+		// Untouched tiles are still absent rather than allocated on load.
+		UASSERTEQ(int, reloaded.m_micro.tileAt(v3s16(12, 12, 12)), MICRO_NO_TILE);
+	}
 
-	reloaded.m_micro.clear(*pool);
-	block.m_micro.clear(*pool);
+	// Both blocks are gone now; every tile either of them held must be back
+	// in the pool. This is what would catch a load-path (or save-path) tile
+	// leak: the earlier manual m_micro.clear() calls masked exactly this.
+	UASSERTEQ(u32, pool->used(), 0);
 }

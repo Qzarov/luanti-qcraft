@@ -133,9 +133,27 @@ const u8 *MicroTilePool::nibbles(u16 tile) const
 
 namespace
 {
+	//! relp must be block-relative, i.e. every component in [0, MAP_BLOCKSIZE).
+	//! Bounds-checked with sanity_check, not assert, so a bad relp (an AABB
+	//! sweep or raycast gone wrong) is caught in Release builds too, before it
+	//! reaches microTileSlot()/microNodeInTile() and turns into an
+	//! out-of-range m_directory index or a silent alias of the wrong tile.
+	inline void checkRelp(v3s16 relp)
+	{
+		sanity_check(relp.X >= 0 && relp.X < MAP_BLOCKSIZE &&
+				relp.Y >= 0 && relp.Y < MAP_BLOCKSIZE &&
+				relp.Z >= 0 && relp.Z < MAP_BLOCKSIZE);
+	}
+
 	//! Position of a sub-cube inside a tile's nibble stream.
 	inline u32 nibbleIndex(const MicroGeometry &g, u16 node_in_tile, u16 sub)
 	{
+		// Bounds-checked here, the single place the offset is computed, so
+		// every caller (getSub, setSub) is covered. A future carving path
+		// that derives sub from a raycast is exactly the kind of caller that
+		// would otherwise walk this off the end of the tile, or (for the
+		// pool's last tile) off the end of storage entirely.
+		sanity_check(sub < g.sub_count);
 		return (u32)node_in_tile * g.sub_count + sub;
 	}
 
@@ -157,6 +175,7 @@ namespace
 
 u16 MicroLayer::tileAt(v3s16 relp) const
 {
+	checkRelp(relp);
 	if (m_directory.empty())
 		return MICRO_NO_TILE;
 	return m_directory[microTileSlot(relp)];
@@ -164,6 +183,7 @@ u16 MicroLayer::tileAt(v3s16 relp) const
 
 content_t MicroLayer::getSub(const MicroTilePool &pool, v3s16 relp, u16 sub) const
 {
+	// tileAt() below validates relp; sub is validated inside nibbleIndex().
 	const u16 tile = tileAt(relp);
 	if (tile == MICRO_NO_TILE)
 		return CONTENT_IGNORE;
@@ -176,10 +196,11 @@ content_t MicroLayer::getSub(const MicroTilePool &pool, v3s16 relp, u16 sub) con
 
 bool MicroLayer::setSub(MicroTilePool &pool, v3s16 relp, u16 sub, content_t c)
 {
+	checkRelp(relp);
 	const u16 slot_index = microTileSlot(relp);
 
 	if (m_directory.empty())
-		m_directory.assign(MICRO_TILES_PER_BLOCK, MICRO_NO_TILE);
+		resetDirectory();
 
 	u16 tile = m_directory[slot_index];
 	bool allocated_here = false;

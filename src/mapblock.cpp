@@ -738,7 +738,7 @@ void MapBlock::deSerialize(std::istream &in_compressed, u8 version, bool disk)
 			// m_micro was already cleared unconditionally above; just size
 			// the directory back up before filling in the allocated slots.
 			const u64 present_bits = readU64(is);
-			m_micro.directory().assign(MICRO_TILES_PER_BLOCK, MICRO_NO_TILE);
+			m_micro.resetDirectory();
 
 			for (u16 slot = 0; slot < MICRO_TILES_PER_BLOCK; slot++) {
 				if (!((present_bits >> slot) & 1))
@@ -752,7 +752,7 @@ void MapBlock::deSerialize(std::istream &in_compressed, u8 version, bool disk)
 				// through m_micro and gets released (by the destructor, or
 				// whatever else eventually clears m_micro) instead of
 				// leaking silently.
-				m_micro.directory()[slot] = tile;
+				m_micro.adoptTile(slot, tile);
 
 				const u8 used = readU8(is);
 				if (used == 0 || used > MICRO_PALETTE_SLOTS)

@@ -7,6 +7,7 @@
 #include "irr_v3d.h"
 #include "constants.h"
 #include "mapnode.h"
+#include "debug.h"
 
 /*
 	A carved node is subdivided into N^3 sub-cubes, each holding its own
@@ -56,6 +57,12 @@ bool microSubdivisionSupported(u8 n);
  * \throws std::invalid_argument if n is not supported.
  */
 MicroGeometry microGeometryFor(u8 n);
+
+// microTileSlot()/microNodeInTile() below hardcode a shift of 2 and a mask of
+// 3 for each axis, which is only correct for MICRO_TILE_AXIS == 4. Tie that
+// assumption to the constant so it cannot silently drift.
+static_assert(MICRO_TILE_AXIS == 4,
+		"microTileSlot/microNodeInTile shifts and masks assume an axis of 4");
 
 //! Which tile of a mapblock a node belongs to. relp is block-relative, 0..15.
 inline u16 microTileSlot(v3s16 relp)
@@ -139,6 +146,16 @@ private:
 class MicroLayer
 {
 public:
+	MicroLayer() = default;
+	// Copying would duplicate the raw pool indices held in m_directory
+	// without telling the pool, so releasing either copy's tiles (or letting
+	// both be destroyed) would release the same tile twice. Moves are fine:
+	// they transfer ownership, leaving the source empty.
+	MicroLayer(const MicroLayer &) = delete;
+	MicroLayer &operator=(const MicroLayer &) = delete;
+	MicroLayer(MicroLayer &&) = default;
+	MicroLayer &operator=(MicroLayer &&) = default;
+
 	bool empty() const { return m_directory.empty(); }
 
 	//! MICRO_NO_TILE when the node's tile was never allocated.
@@ -153,8 +170,25 @@ public:
 
 	void clear(MicroTilePool &pool);
 
+	//! Sizes the (empty) directory to one MICRO_NO_TILE entry per tile, for
+	//! deSerialize to fill in via adoptTile as it reads allocated slots.
+	void resetDirectory()
+	{
+		m_directory.assign(MICRO_TILES_PER_BLOCK, MICRO_NO_TILE);
+	}
+
+	//! Records a tile the caller (deSerialize) already allocated from the
+	//! pool into directory slot `slot`. Unlike writing into directory()
+	//! directly, this cannot be used to silently overwrite a live slot and
+	//! leak whatever tile was there: slot must currently be MICRO_NO_TILE.
+	void adoptTile(u16 slot, u16 tile)
+	{
+		sanity_check(slot < m_directory.size());
+		sanity_check(m_directory[slot] == MICRO_NO_TILE);
+		m_directory[slot] = tile;
+	}
+
 	const std::vector<u16> &directory() const { return m_directory; }
-	std::vector<u16> &directory() { return m_directory; }
 
 private:
 	std::vector<u16> m_directory;

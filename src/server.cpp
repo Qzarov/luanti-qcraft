@@ -492,8 +492,9 @@ void Server::init()
 		Settings world_mt;
 		const std::string world_mt_path = m_path_world + DIR_DELIM "world.mt";
 		u16 subdivision = 4;
-		if (world_mt.readConfigFile(world_mt_path.c_str()) &&
-				world_mt.exists("qcraft_subdivision"))
+		const bool read_ok = world_mt.readConfigFile(world_mt_path.c_str());
+		const bool have_key = read_ok && world_mt.exists("qcraft_subdivision");
+		if (have_key)
 			subdivision = (u16)world_mt.getU16("qcraft_subdivision");
 
 		// Validate the untruncated u16 before narrowing: a value like 258 or
@@ -503,6 +504,21 @@ void Server::init()
 		if (subdivision > 0xFF || !microSubdivisionSupported((u8)subdivision)) {
 			throw ServerError("unsupported microblock subdivision: " +
 					itos(subdivision));
+		}
+
+		if (!have_key) {
+			// N is chosen at world generation and immutable for the rest of
+			// the world's life: reinterpreting already-stored tiles under a
+			// different N is unrecoverable. A freshly generated world has no
+			// key yet and would otherwise silently default to 4 every
+			// startup, with nothing on disk recording that choice. Stamp the
+			// default into world.mt now, leaving every other key untouched,
+			// so the value this world actually runs with is permanent.
+			world_mt.setU16("qcraft_subdivision", subdivision);
+			if (!world_mt.updateConfigFile(world_mt_path.c_str())) {
+				throw ServerError("Failed to write qcraft_subdivision to "
+						"world.mt");
+			}
 		}
 
 		const MicroGeometry geom = microGeometryFor((u8)subdivision);
